@@ -87,6 +87,9 @@ public:
      */
     void setSampleRate(int rate) { sampleRate = rate; }
 
+    void setVolumeLevel(uint8_t level);
+    uint8_t getVolumeLevel() const { return volumeLevel; }
+
     /**
      * 获取可用的音频样本数量
      */
@@ -118,6 +121,7 @@ private:
     float cyclesPerSample = 0; // CPU cycles per audio sample
     float cycleAccum = 0;      // 周期累加器
     int sampleRate = 44100;   // 音频采样率
+    volatile uint8_t volumeLevel = 4; // 0..5, each block is 20%
     volatile uint64_t cpuClock = 0;         // CPU 时钟计数器（主循环累加）
     volatile uint64_t lastSampledClock = 0; // 上次采样时的 CPU 时钟
     

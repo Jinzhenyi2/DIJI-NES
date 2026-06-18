@@ -12,6 +12,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [v0.5.0] - 2026-06-18
+
+### 新增
+
+- 新增开机 DIJI-NES logo 粒子聚合动画，使用 1-bit bitmap 资源，黑底白色显示。
+- 暂停菜单新增 5 格图形音量控制，每格代表 20% 音量，支持左右键调节。
+- 新增 logo bitmap 资源生成后的嵌入式显示支持。
+
+### Added
+
+- Added a DIJI-NES logo particle boot animation using a 1-bit bitmap resource on a black background.
+- Added a 5-block graphical volume control in the pause menu, with each block representing 20% volume and adjustable with LEFT/RIGHT.
+- Added embedded display support for the generated logo bitmap resource.
+
+### 变更
+
+- 改善 APU 输出链路：加入直流偏置跟踪、软限幅和轻微平滑，以提高 8530 蜂鸣器上的可用音量并减少破音。
+
+### Changed
+
+- Improved the APU output path with DC offset tracking, soft limiting, and light smoothing to increase usable volume on the 8530 speaker while reducing clipping.
+
+---
+
 ## [v0.4.0] - 2026-05-28
 
 ### 新增

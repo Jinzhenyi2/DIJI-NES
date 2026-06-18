@@ -10,6 +10,7 @@
 #include "freertos/queue.h"
 #include "nes.h"
 #include "lgfx_conf.h"
+#include "logo_bitmap.h"
 #include "driver/i2s.h"
 #include "esp_err.h"
 #include "esp_timer.h"
@@ -43,6 +44,8 @@ static int selectedIndex = 0;             // 当前选中的游戏索引
 static int scrollOffset = 0;              // 滚动偏移
 static const int ITEMS_PER_PAGE = 8;      // 每页显示的游戏数量
 static int pauseMenuIndex = 0;            // 暂停菜单选项索引
+static constexpr int PAUSE_OPTION_COUNT = 5;
+static constexpr int PAUSE_VOLUME_INDEX = 1;
 
 // ROM 文件名可能包含 UTF-8 中文；默认 Font0 不含中文字形。
 static const lgfx::IFont* MENU_ROM_FONT = &fonts::efontCN_16;
@@ -157,9 +160,12 @@ struct ButtonState {
 void updateButtons();
 void runFrame();
 void scanROMFiles();
+void playBootAnimation();
+void drawBootLogo(int y, uint16_t color);
 void drawMainMenu();
 void drawMenuList();
 void drawPauseMenu();
+void drawVolumeBlocks(int x, int y, uint8_t level, bool selected);
 void handleMenuInput();
 void handlePauseInput();
 bool loadSelectedROM();
@@ -204,7 +210,7 @@ void initializeSerial() {
 
 void initializeScreen() {
     tft.init();
-    tft.setRotation(3);  // 横屏模式
+    tft.setRotation(1);  // 横屏模式
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextSize(1);
@@ -225,6 +231,101 @@ void initializeScreen() {
         DISPLAY_WIDTH * DISPLAY_BLOCK_LINES * sizeof(uint16_t),
         MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
     );
+}
+
+void drawBootLogo(int y, uint16_t color) {
+    const int logoX = (320 - DIJI_LOGO_W) / 2;
+    tft.drawBitmap(logoX, y, DIJI_LOGO_BITS, DIJI_LOGO_W, DIJI_LOGO_H, color);
+
+    tft.setTextColor(color, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(128, y + DIJI_LOGO_H + 12);
+    tft.print("ESP32-S3 NES");
+}
+
+static bool bootLogoPixelOn(int x, int y) {
+    if (x < 0 || x >= DIJI_LOGO_W || y < 0 || y >= DIJI_LOGO_H) return false;
+    int byteIndex = y * ((DIJI_LOGO_W + 7) / 8) + (x >> 3);
+    uint8_t mask = 0x80 >> (x & 7);
+    return (pgm_read_byte(DIJI_LOGO_BITS + byteIndex) & mask) != 0;
+}
+
+static bool bootLogoBlockOn(int x, int y, int blockSize) {
+    for (int yy = 0; yy < blockSize; yy++) {
+        for (int xx = 0; xx < blockSize; xx++) {
+            if (bootLogoPixelOn(x + xx, y + yy)) return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t bootHash(uint32_t value) {
+    value ^= value >> 16;
+    value *= 0x7feb352d;
+    value ^= value >> 15;
+    value *= 0x846ca68b;
+    value ^= value >> 16;
+    return value;
+}
+
+void playBootAnimation() {
+    tft.fillScreen(TFT_BLACK);
+
+    const int logoY = 74;
+    const int logoX = (320 - DIJI_LOGO_W) / 2;
+    const int blockSize = 3;
+    const int frames = 30;
+
+    // Logo 小方块从随机散点聚集成形。每个粒子有自己的延迟和速度，
+    // 避免看起来像一个矩形整体向内收缩。
+    for (int frame = 0; frame <= frames; frame++) {
+        tft.fillScreen(TFT_BLACK);
+
+        for (int by = 0; by < DIJI_LOGO_H; by += blockSize) {
+            for (int bx = 0; bx < DIJI_LOGO_W; bx += blockSize) {
+                if (!bootLogoBlockOn(bx, by, blockSize)) continue;
+
+                int targetX = logoX + bx;
+                int targetY = logoY + by;
+                uint32_t h = bootHash((uint32_t)bx * 131u + (uint32_t)by * 17u);
+                int delayFrames = h % 9;
+                int travelFrames = 14 + ((h >> 8) % 12);
+                int localFrame = frame - delayFrames;
+
+                if (localFrame < 0) {
+                    if ((h & 0x03) != 0) continue;
+                    localFrame = 0;
+                }
+                if (localFrame > travelFrames) localFrame = travelFrames;
+
+                int startX = (int)((h >> 16) % 380) - 30;
+                int startY = (int)((h >> 1) % 300) - 30;
+                int jitterX = (int)((h >> 24) & 0x0F) - 8;
+                int jitterY = (int)((h >> 20) & 0x0F) - 8;
+
+                int eased = localFrame * localFrame * (3 * travelFrames - 2 * localFrame);
+                int denom = travelFrames * travelFrames * travelFrames;
+                int x = startX + ((targetX - startX) * eased) / denom;
+                int y = startY + ((targetY - startY) * eased) / denom;
+
+                int remaining = travelFrames - localFrame;
+                if (remaining > 4) {
+                    x += (jitterX * remaining) / travelFrames;
+                    y += (jitterY * remaining) / travelFrames;
+                }
+
+                int particleSize = 2 + ((h >> 28) & 0x03);
+                if (localFrame == travelFrames) particleSize = blockSize;
+                tft.fillRect(x, y, particleSize, particleSize, TFT_WHITE);
+            }
+        }
+
+        delay(24);
+    }
+
+    tft.fillScreen(TFT_BLACK);
+    drawBootLogo(logoY, TFT_WHITE);
+    delay(2000);
 }
 
 // 在 loop() 中调用：检查帧完成并入队
@@ -598,7 +699,7 @@ void drawPauseMenu() {
     
     // 暂停菜单框
     int menuWidth = 160;
-    int menuHeight = 140;  // 增加高度以容纳更多选项
+    int menuHeight = 154;  // 增加高度以容纳更多选项
     int menuX = (320 - menuWidth) / 2;
     int menuY = (240 - menuHeight) / 2;
     
@@ -616,13 +717,12 @@ void drawPauseMenu() {
     // 分隔线
     tft.drawFastHLine(menuX + 10, menuY + 32, menuWidth - 20, MENU_BORDER_COLOR);
     
-    // 菜单选项 - 添加 Save/Load State
-    const char* options[] = {"Continue", "Save State", "Load State", "Exit to Menu"};
-    int optionCount = 4;
+    // 菜单选项 - 添加 Volume 和 Save/Load State
+    const char* options[] = {"Continue", "Volume", "Save State", "Load State", "Exit to Menu"};
     tft.setTextSize(1);
     
-    for (int i = 0; i < optionCount; i++) {
-        int optY = menuY + 42 + i * 20;
+    for (int i = 0; i < PAUSE_OPTION_COUNT; i++) {
+        int optY = menuY + 40 + i * 20;
         
         if (i == pauseMenuIndex) {
             tft.fillRect(menuX + 10, optY - 2, menuWidth - 20, 18, MENU_HIGHLIGHT_BG);
@@ -637,12 +737,34 @@ void drawPauseMenu() {
         }
         
         tft.print(options[i]);
+        if (i == PAUSE_VOLUME_INDEX) {
+            drawVolumeBlocks(menuX + 82, optY + 3, nes.apu.getVolumeLevel(), i == pauseMenuIndex);
+        }
     }
     
     // 操作提示
     tft.setTextColor(MENU_HINT_COLOR);
     tft.setCursor(menuX + 15, menuY + menuHeight - 12);
-    tft.print("UP/DOWN: Select  A: OK");
+    tft.print("UP/DOWN: Select  L/R: Vol");
+}
+
+void drawVolumeBlocks(int x, int y, uint8_t level, bool selected) {
+    const int blockW = 10;
+    const int blockH = 8;
+    const int gap = 3;
+    uint16_t filled = selected ? MENU_TITLE_COLOR : MENU_TEXT_COLOR;
+    uint16_t empty = selected ? MENU_ARROW_COLOR : MENU_BORDER_COLOR;
+
+    for (int i = 0; i < 5; i++) {
+        int bx = x + i * (blockW + gap);
+        tft.drawRect(bx, y, blockW, blockH, empty);
+        if (i < level) {
+            tft.fillRect(bx + 2, y + 2, blockW - 4, blockH - 4, filled);
+        } else {
+            tft.fillRect(bx + 2, y + 2, blockW - 4, blockH - 4,
+                         selected ? MENU_HIGHLIGHT_BG : MENU_BG_COLOR);
+        }
+    }
 }
 
 // ================ 菜单输入处理 ================
@@ -777,8 +899,19 @@ void handlePauseInput() {
     }
     
     if (buttons.DOWN) {
-        if (pauseMenuIndex < 3) {  // 现在有4个选项 (0-3)
+        if (pauseMenuIndex < PAUSE_OPTION_COUNT - 1) {
             pauseMenuIndex++;
+            buttonPressed = true;
+        }
+    }
+
+    if (pauseMenuIndex == PAUSE_VOLUME_INDEX && (buttons.LEFT || buttons.RIGHT)) {
+        uint8_t level = nes.apu.getVolumeLevel();
+        if (buttons.LEFT && level > 0) {
+            nes.apu.setVolumeLevel(level - 1);
+            buttonPressed = true;
+        } else if (buttons.RIGHT && level < 5) {
+            nes.apu.setVolumeLevel(level + 1);
             buttonPressed = true;
         }
     }
@@ -797,7 +930,11 @@ void handlePauseInput() {
             resetFrameScheduler(3);
             gameRunning = true;  // 恢复音频
             currentState = STATE_PLAYING;
-        } else if (pauseMenuIndex == 1) {
+        } else if (pauseMenuIndex == PAUSE_VOLUME_INDEX) {
+            uint8_t level = nes.apu.getVolumeLevel();
+            nes.apu.setVolumeLevel(level < 5 ? level + 1 : 0);
+            drawPauseMenu();
+        } else if (pauseMenuIndex == 2) {
             // Save State
             tft.fillScreen(TFT_BLACK);
             tft.setTextColor(MENU_TITLE_COLOR);
@@ -828,7 +965,7 @@ void handlePauseInput() {
             resetFrameScheduler(3);
             gameRunning = true;
             currentState = STATE_PLAYING;
-        } else if (pauseMenuIndex == 2) {
+        } else if (pauseMenuIndex == 3) {
             // Load State
             tft.fillScreen(TFT_BLACK);
             tft.setTextColor(MENU_TITLE_COLOR);
@@ -1057,6 +1194,7 @@ void setup() {
     
     // 显示主菜单
     currentState = STATE_MENU;
+    playBootAnimation();
     drawMainMenu();
 }
 

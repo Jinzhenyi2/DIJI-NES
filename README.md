@@ -34,6 +34,8 @@ A NES (Nintendo Entertainment System) emulator running on ESP32-S3 microcontroll
 - **Mapper 支持** - NROM, MMC1, UxROM, CNROM, MMC3
 - **存档功能** - 快速存档/读档到 SD 卡
 - **菜单系统** - ROM 浏览器、暂停菜单、无 SD 卡时提示界面，支持 UTF-8 中文 ROM 文件名显示
+- **音量控制** - 暂停菜单内提供 5 格图形音量条，每格 20%
+- **开机动画** - 黑底白色 DIJI-NES logo 粒子聚合动画
 - **友好失败提示** - 不支持的 Mapper 或异常 ROM 会提示后返回主菜单
 - **USB CDC 烧录** - ESP32-S3 原生 USB CDC 默认启用，方便通过板载 USB 口烧录和查看串口日志
 
@@ -47,6 +49,8 @@ A NES (Nintendo Entertainment System) emulator running on ESP32-S3 microcontroll
 - **Mapper support** - NROM, MMC1, UxROM, CNROM, MMC3
 - **Save states** - Quick save/load to SD card
 - **Menu system** - ROM browser, pause menu, no-SD-card prompt, and UTF-8 Chinese ROM filename display
+- **Volume control** - 5-block graphical volume bar in the pause menu, 20% per block
+- **Boot animation** - White DIJI-NES logo particle animation on a black background
 - **Friendly failure messages** - Unsupported mappers or invalid ROMs show a message and return to the main menu
 - **USB CDC flashing** - ESP32-S3 native USB CDC is enabled by default for flashing and serial logs through the board USB port
 
@@ -93,10 +97,10 @@ A small number of games with non-standard timing, special mappers, or bootleg ma
 |------------|---------------|
 | 模拟 FPS   | 大部分游戏约 57-61 FPS；重精灵场景约 55-58 FPS |
 | 音频采样率 | 44100 Hz      |
-| Flash 使用 | ~797 KB app 固件 (约 12.2% app 分区) |
+| Flash 使用 | ~803 KB app 固件 (约 12.3% app 分区) |
 | RAM 使用   | ~52 KB (16%)  |
 
-> 注：v0.4.0 包含中文 ROM 文件名字体，因此 Flash 占用高于 v0.3.0；静态 RAM 占用基本不变。
+> 注：v0.5.0 包含中文 ROM 文件名字体和 1-bit logo bitmap，因此 Flash 占用高于 v0.3.0；静态 RAM 占用基本不变。
 >
 > v0.3.0 起优先保证精灵显示正确性与横向卷轴边缘稳定性。相比最激进的固定隔帧跳帧方案，部分场景可能低约 1 FPS，但可避免《超级马里奥兄弟》等游戏在受伤/闪烁阶段出现角色消失。
 >
@@ -108,10 +112,10 @@ A small number of games with non-standard timing, special mappers, or bootleg ma
 |--------|-------|
 | Emulation FPS | Most games around 57-61 FPS; object-heavy scenes around 55-58 FPS |
 | Audio sample rate | 44100 Hz |
-| Flash usage | ~797 KB app firmware (about 12.2% of the app partition) |
+| Flash usage | ~803 KB app firmware (about 12.3% of the app partition) |
 | RAM usage | ~52 KB (16%) |
 
-> Note: v0.4.0 includes a Chinese-capable ROM filename font, so Flash usage is higher than v0.3.0; static RAM usage is mostly unchanged.
+> Note: v0.5.0 includes a Chinese-capable ROM filename font and a 1-bit logo bitmap, so Flash usage is higher than v0.3.0; static RAM usage is mostly unchanged.
 >
 > Since v0.3.0, the emulator prioritizes sprite correctness and stable horizontal scrolling edges. Compared with the most aggressive fixed frame-skip mode, some scenes may be about 1 FPS slower, but this avoids disappearing sprites during damage/blinking effects in games such as Super Mario Bros.
 >
@@ -267,7 +271,7 @@ If you encounter these problems, try modifying the following setting in lgfx_con
 
 为方便直接烧录，仓库根目录提供了预编译合并固件：
 
-- [firmware/DIJI-NES_v0.4.0.bin](firmware/DIJI-NES_v0.4.0.bin)
+- [firmware/DIJI-NES_v0.5.0.bin](firmware/DIJI-NES_v0.5.0.bin)
 
 该文件已合并 **bootloader + partitions + boot_app0 + app firmware**，可直接按地址 **0x0** 烧录。
 
@@ -275,7 +279,7 @@ If you encounter these problems, try modifying the following setting in lgfx_con
 
 For convenience, a prebuilt merged firmware image is included in the repository root:
 
-- [firmware/DIJI-NES_v0.4.0.bin](firmware/DIJI-NES_v0.4.0.bin)
+- [firmware/DIJI-NES_v0.5.0.bin](firmware/DIJI-NES_v0.5.0.bin)
 
 This image already contains the **bootloader + partitions + boot_app0 + application firmware**, so it can be flashed directly to address **0x0**.
 
@@ -313,7 +317,7 @@ This image already contains the **bootloader + partitions + boot_app0 + applicat
      <img src="./images/DIJI-NES_flash-download.png" alt="Flash Download Tool Example" width="80%">
    </p>
 
-3. 选择仓库中的合并固件文件 [firmware/DIJI-NES_v0.4.0.bin](firmware/DIJI-NES_v0.4.0.bin)，烧录地址填写 **0x0**。
+3. 选择仓库中的合并固件文件 [firmware/DIJI-NES_v0.5.0.bin](firmware/DIJI-NES_v0.5.0.bin)，烧录地址填写 **0x0**。
 4. 确认设备串口连接正常后，点击 **START** 开始烧录。
 5. 烧录完成后重启设备，即可进入 DIJI-NES。
 
@@ -329,7 +333,7 @@ Download: <https://docs.espressif.com/projects/esp-test-tools/zh_CN/latest/esp32
      <img src="./images/DIJI-NES_flash-download.png" alt="Flash Download Tool Example" width="80%">
    </p>
 
-3. Select the merged firmware file [firmware/DIJI-NES_v0.4.0.bin](firmware/DIJI-NES_v0.4.0.bin) from this repository and set the flash address to **0x0**.
+3. Select the merged firmware file [firmware/DIJI-NES_v0.5.0.bin](firmware/DIJI-NES_v0.5.0.bin) from this repository and set the flash address to **0x0**.
 4. After confirming the serial port is connected correctly, click **START** to begin flashing.
 5. Reboot the device after flashing completes to start DIJI-NES.
 
@@ -483,7 +487,9 @@ This information is based on community feedback and troubleshooting experience.
    - **上/下** 滚动列表
    - **START** 或 **A** 启动游戏
 5. **游戏内控制**:
-   - **START + SELECT**: 打开暂停菜单（可返回 ROM 浏览器）
+   - **START + SELECT**: 打开暂停菜单
+   - 暂停菜单中可继续游戏、调整 5 格音量、保存/读取状态或返回 ROM 浏览器
+   - 选中 **Volume** 时，使用 **LEFT/RIGHT** 调节音量
 
 ## Usage
 
@@ -497,7 +503,9 @@ This project is intended solely for technical learning and research. The author 
    - **UP/DOWN** scrolls the list
    - **START** or **A** starts the game
 5. **In-game control**:
-   - **START + SELECT** opens the pause menu, where you can return to the ROM browser
+   - **START + SELECT** opens the pause menu
+   - The pause menu lets you continue, adjust the 5-block volume bar, save/load state, or return to the ROM browser
+   - When **Volume** is selected, use **LEFT/RIGHT** to adjust volume
 
 ---
 
@@ -508,9 +516,13 @@ DiJi-NES/
 ├── firmware/
 │   ├── DIJI-NES_v0.2.1.bin # 旧版预编译合并固件
 │   ├── DIJI-NES_v0.3.0.bin # 旧版预编译合并固件
-│   └── DIJI-NES_v0.4.0.bin # 当前预编译合并固件，可直接烧录到 0x0
+│   ├── DIJI-NES_v0.4.0.bin # 旧版预编译合并固件
+│   └── DIJI-NES_v0.5.0.bin # 当前预编译合并固件，可直接烧录到 0x0
+├── assets/
+│   └── DIJI-NES_logo.png # 开机动画 logo 源图
 ├── src/
 │   ├── main.cpp        # 入口、硬件初始化、主循环
+│   ├── logo_bitmap.h   # 1-bit 开机 logo 点阵
 │   ├── nes.h/.cpp      # NES 系统总线、内存映射
 │   ├── cpu6502.h/.cpp  # 6502 CPU 模拟
 │   ├── ppu.h/.cpp      # PPU 图形处理器
@@ -527,9 +539,13 @@ DiJi-NES/
 ├── firmware/
 │   ├── DIJI-NES_v0.2.1.bin # Previous prebuilt merged firmware
 │   ├── DIJI-NES_v0.3.0.bin # Previous prebuilt merged firmware
-│   └── DIJI-NES_v0.4.0.bin # Current prebuilt merged firmware, flashable at 0x0
+│   ├── DIJI-NES_v0.4.0.bin # Previous prebuilt merged firmware
+│   └── DIJI-NES_v0.5.0.bin # Current prebuilt merged firmware, flashable at 0x0
+├── assets/
+│   └── DIJI-NES_logo.png # Source logo for the boot animation
 ├── src/
 │   ├── main.cpp        # Entry point, hardware init, main loop
+│   ├── logo_bitmap.h   # 1-bit boot logo bitmap
 │   ├── nes.h/.cpp      # NES system bus and memory map
 │   ├── cpu6502.h/.cpp  # 6502 CPU emulation
 │   ├── ppu.h/.cpp      # PPU graphics processor

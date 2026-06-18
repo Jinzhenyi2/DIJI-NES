@@ -12,7 +12,9 @@
 
 // I2S 音频缓冲区（类似 Anemoia）
 #define APU_AUDIO_BUFFER_SIZE 128
-static uint16_t apu_audio_buffer[APU_AUDIO_BUFFER_SIZE * 2];  // stereo
+// 临时大音量测试：保留原混音音色，去除直流偏置后使用软限幅减少破音。
+#define APU_VOLUME_GAIN 5
+static int16_t apu_audio_buffer[APU_AUDIO_BUFFER_SIZE * 2];  // stereo
 static uint16_t apu_buffer_index = 0;
 
 /**
@@ -78,6 +80,11 @@ APU::APU() {
 
 APU::~APU() {
     // 无需特殊清理
+}
+
+void APU::setVolumeLevel(uint8_t level) {
+    if (level > 5) level = 5;
+    volumeLevel = level;
 }
 
 /**
@@ -436,32 +443,51 @@ void APU::clock() {
     if (pulse_hz > THRESHOLD) {
         pulse_hz -= THRESHOLD;
         
-        // 获取各通道输出并混合 (类似 Anemoia 的简化混合)
-        uint16_t sample = 0;
+        // 获取各通道输出并混合 (类似 Anemoia 的简化混合)。
+        // 先保留 NES 通道原本的单极性混音形态，再用慢速 DC 跟踪居中，
+        // 比把每个方波通道强行改成正负摆动更不容易刺耳。
+        uint16_t mixed = 0;
         
         // Pulse 1
         if (pulse[0].lengthCounter > 0 && pulse[0].output() > 0) {
-            sample += pulse[0].volume;
+            mixed += pulse[0].volume;
         }
         // Pulse 2
         if (pulse[1].lengthCounter > 0 && pulse[1].output() > 0) {
-            sample += pulse[1].volume;
+            mixed += pulse[1].volume;
         }
         // Triangle
-        sample += triangle.output();
+        mixed += triangle.output();
         // Noise
         if (noise.lengthCounter > 0 && !(noise.shiftRegister & 0x01)) {
-            sample += noise.volume;
+            mixed += noise.volume;
         }
         
-        // 限制最大值并转换为 16-bit 音量
-        if (sample > 255) sample = 255;
-        sample <<= 8;  // 放大到 16-bit 范围
+        if (mixed > 255) mixed = 255;
+        int32_t rawSample = (int32_t)mixed << 8;
+        static int32_t dcEstimate = 0;
+        dcEstimate += (rawSample - dcEstimate) >> 10;
+
+        int32_t sample = (rawSample - dcEstimate) * APU_VOLUME_GAIN;
+        constexpr int32_t SOFT_LIMIT = 18000;
+        constexpr int32_t HARD_LIMIT = 30000;
+        if (sample > SOFT_LIMIT) {
+            sample = SOFT_LIMIT + (sample - SOFT_LIMIT) / 6;
+        } else if (sample < -SOFT_LIMIT) {
+            sample = -SOFT_LIMIT + (sample + SOFT_LIMIT) / 6;
+        }
+        if (sample > HARD_LIMIT) sample = HARD_LIMIT;
+        if (sample < -HARD_LIMIT) sample = -HARD_LIMIT;
+
+        static int32_t filteredSample = 0;
+        filteredSample += (sample - filteredSample) >> 1;
+        sample = filteredSample;
+        sample = (sample * volumeLevel) / 5;
         
         // 写入立体声缓冲区 (左右声道相同)
         uint16_t index = apu_buffer_index << 1;
-        apu_audio_buffer[index] = sample;
-        apu_audio_buffer[index + 1] = sample;
+        apu_audio_buffer[index] = (int16_t)sample;
+        apu_audio_buffer[index + 1] = (int16_t)sample;
         
         apu_buffer_index++;
         if (apu_buffer_index >= APU_AUDIO_BUFFER_SIZE) {
