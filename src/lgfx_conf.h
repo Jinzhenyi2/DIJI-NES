@@ -1,7 +1,11 @@
+// lgfx_conf.h
+#ifndef LGFX_CONF_H
+#define LGFX_CONF_H
+
 #include <LovyanGFX.hpp>
 
 // ====================================================================
-//  DIJI-NES  屏幕配置 —— ST7735 128x160 面板，横屏使用 (160x128)
+//  DIJI-NES  屏幕配置 —— ST7735S 128x160 面板，横屏使用 (160x128)
 //
 //  panel_width/height 填物理分辨率 128x160；
 //  main.cpp 里 tft.setRotation(1) 旋转为横屏 160x128。
@@ -11,9 +15,8 @@
 
 class LGFX : public lgfx::LGFX_Device
 {
-  lgfx::Panel_ST7735     _panel_instance;   // ST7735
-
-  lgfx::Bus_SPI          _bus_instance;     // SPI 总线
+  lgfx::Panel_ST7735S   _panel_instance;   // 改为 ST7735S
+  lgfx::Bus_SPI         _bus_instance;
 
 public:
   LGFX(void)
@@ -22,7 +25,7 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host    = SPI3_HOST;
       cfg.spi_mode    = 0;
-      cfg.freq_write  = 40000000;   // ST7735 建议 40MHz；花屏可降到 27000000
+      cfg.freq_write  = 40000000;   // ST7735S 建议 40MHz；花屏可降到 27000000
       cfg.freq_read   = 6000000;
       cfg.spi_3wire   = true;
       cfg.use_lock    = false;
@@ -43,7 +46,7 @@ public:
 
       cfg.panel_width      = 128;   // 物理宽
       cfg.panel_height     = 160;   // 物理高
-      cfg.offset_x         = 0;     // 画面偏移/被裁切时调：绿Tab 0,0 | 红Tab 2,1
+      cfg.offset_x         = 0;     // 画面偏移/被裁切时调：通常 0,0，若偏移试 2,1
       cfg.offset_y         = 0;
       cfg.offset_rotation  = 0;     // 横屏错位时可试 1~7
 
@@ -60,3 +63,5 @@ public:
     setPanel(&_panel_instance);
   }
 };
+
+#endif
