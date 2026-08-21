@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:
+  workflow_dispatch:          # 允许手动触发
 
 jobs:
   build:
@@ -25,20 +25,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      # 生成标准 firmware.bin
+      # 编译（会自动生成 merged.bin，因为 platformio.ini 中有 board_build.merge_bin = true）
       - name: Build firmware
         run: pio run
 
+      # 上传 firmware.bin（烧录地址 0x10000）
       - name: Upload firmware.bin
         uses: actions/upload-artifact@v4
         with:
           name: DIJI-NES-firmware
           path: .pio/build/*/firmware.bin
 
-      # 生成合并固件 merged.bin
-      - name: Build merged firmware
-        run: pio run -t mergebin
-
+      # 上传 merged.bin（烧录地址 0x0）
       - name: Upload merged.bin
         uses: actions/upload-artifact@v4
         with:
