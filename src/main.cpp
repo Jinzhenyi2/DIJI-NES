@@ -1,3 +1,4 @@
+// main.cpp
 #include <Arduino.h>
 #include <SD.h>
 #include <SPI.h>
@@ -9,15 +10,17 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "nes.h"
-#include "lgfx_conf.h"
+#include "lgfx_conf.h"          // 使用独立的屏幕配置文件
 #include "logo_bitmap.h"
 #include "driver/i2s.h"
 #include "esp_err.h"
 #include "esp_timer.h"
+
 // 串口调试开关
 #ifndef ENABLE_DEBUG_SERIAL
 #define ENABLE_DEBUG_SERIAL false
 #endif
+
 // ================ 菜单颜色配置 (高级灰色调) ================
 #define MENU_BG_COLOR       0x2104  // 深灰背景 (RGB: 32, 32, 32)
 #define MENU_HEADER_COLOR   0x4A69  // 中灰标题背景 (RGB: 72, 77, 72)
@@ -28,12 +31,14 @@
 #define MENU_TITLE_COLOR    0xE71C  // 标题文字 (RGB: 224, 224, 224)
 #define MENU_BORDER_COLOR   0x52AA  // 边框颜色 (RGB: 80, 85, 80)
 #define PAUSE_OVERLAY_COLOR 0x18C3  // 暂停遮罩 (深色半透明效果)
+
 // ================ 菜单状态 ================
 enum AppState {
     STATE_MENU,     // 主菜单
     STATE_PLAYING,  // 游戏中
     STATE_PAUSED    // 暂停菜单
 };
+
 static AppState currentState = STATE_MENU;
 static std::vector<String> romList;       // ROM 文件列表
 static int selectedIndex = 0;             // 当前选中的游戏索引
@@ -42,17 +47,21 @@ static const int ITEMS_PER_PAGE = 5;      // 每页显示的游戏数量 (160x12
 static int pauseMenuIndex = 0;            // 暂停菜单选项索引
 static constexpr int PAUSE_OPTION_COUNT = 5;
 static constexpr int PAUSE_VOLUME_INDEX = 1;
+
 // ROM 文件名可能包含 UTF-8 中文；默认 Font0 不含中文字形。
 static const lgfx::IFont* MENU_ROM_FONT = &fonts::efontCN_16;
 static const int MENU_ROM_NAME_MAX_WIDTH = 116;  // 160px 横屏列表可用宽度
+
 // 按键防抖
 static unsigned long lastButtonTime = 0;
 static const unsigned long BUTTON_DEBOUNCE = 200;  // 200ms防抖
+
 #if ENABLE_DEBUG_SERIAL
 #define FPS_PRINT(...) Serial.printf(__VA_ARGS__)
 #else
 #define FPS_PRINT(...) ((void)0)
 #endif
+
 // ================ PIN定义 ================
 // SD卡引脚
 #define SD_CS_PIN     42
@@ -60,6 +69,7 @@ static const unsigned long BUTTON_DEBOUNCE = 200;  // 200ms防抖
 #define SD_MISO_PIN   39
 #define SD_MOSI_PIN   41
 #define SD_FREQ       10000000  // 10 MHz
+
 // 游戏控制器按键
 #define A_BUTTON      48
 #define B_BUTTON      47
@@ -69,16 +79,20 @@ static const unsigned long BUTTON_DEBOUNCE = 200;  // 200ms防抖
 #define DOWN_BUTTON   3
 #define START_BUTTON  15
 #define SELECT_BUTTON 16
+
 // I2S / APU -> MAX98357A (I2S DAC)
 #define I2S_BCLK_PIN 5
 #define I2S_LRCLK_PIN 4
 #define I2S_DATA_PIN 6
+
 // 音频参数
 constexpr int AUDIO_SAMPLE_RATE = 44100;
 constexpr int I2S_NUM = 0;
+
 // ================ 全局变量 ================
 NES nes;
 LGFX tft;
+
 // ====================================================================
 //  屏幕参数 —— 128x160 面板横屏使用 (逻辑 160 x 128)
 //  NES 原生 256x240 经 2x 降采样后为 128x120，居中显示
@@ -93,6 +107,7 @@ constexpr int DISP_WIDTH    = SCREEN_WIDTH  / DOWNSCALE;  // 128
 constexpr int DISP_HEIGHT   = SCREEN_HEIGHT / DOWNSCALE;  // 120
 constexpr int DISP_OFFSET_X = (TFT_WIDTH  - DISP_WIDTH)  / 2;  // 16
 constexpr int DISP_OFFSET_Y = (TFT_HEIGHT - DISP_HEIGHT) / 2;  // 4
+
 // FPS 统计变量
 static uint32_t last_emulation_us = 0;
 static uint32_t fps_count = 0;
@@ -100,7 +115,9 @@ static uint32_t fps_last_ms = 0;
 static uint32_t last_dma_us = 0;
 static uint32_t game_start_ms = 0;
 static uint32_t last_rendered_ms = 0;
+
 SPIClass sdSPI(FSPI);
+
 // 双缓冲：模拟器仍以 256x240 渲染
 static uint16_t* frame_buf[2] = {nullptr, nullptr};
 // 降采样缓冲：256x240 -> 128x120
@@ -108,12 +125,14 @@ static uint16_t* disp_downscale_buf = nullptr;
 static volatile uint8_t render_buf_idx = 0;
 static volatile uint8_t last_displayed_idx = 0;
 static QueueHandle_t frame_queue = nullptr;
+
 static void initializeAudio();
 static void apu_task(void* arg);
 static void muteAudio();
 static bool gameJustEntered = false;
 static volatile bool gameRunning = false;
 static bool sdCardAvailable = false;
+
 // 帧同步
 const uint32_t FRAME_TIME_US = 16667;  // ~60 FPS
 const int CPU_CYCLES_PER_FRAME = 29780;
@@ -122,6 +141,7 @@ static uint64_t next_frame_us = 0;
 static uint8_t force_render_frames = 0;
 static uint8_t consecutive_skipped_frames = 0;
 static uint8_t frameskip_phase = 0;
+
 struct ButtonState {
     uint8_t A = 0;
     uint8_t B = 0;
@@ -132,6 +152,7 @@ struct ButtonState {
     uint8_t START = 0;
     uint8_t SELECT = 0;
 } buttons;
+
 // ================ 函数前向声明 ================
 void updateButtons();
 void runFrame();
@@ -148,6 +169,7 @@ bool loadSelectedROM();
 void returnToMainMenu();
 void clearScreenForGame();
 bool tryInitSD();
+
 static void resetFrameScheduler(uint8_t forceRenderFrames = 2) {
     next_frame_us = 0;
     force_render_frames = forceRenderFrames;
@@ -155,6 +177,7 @@ static void resetFrameScheduler(uint8_t forceRenderFrames = 2) {
     frameskip_phase = 0;
     nes.requestFrameSkip(false);
 }
+
 static void getSaveStatePath(char* savePath, size_t maxLen) {
     const char* romPath = nes.getCurrentRomPath();
     strncpy(savePath, romPath, maxLen - 1);
@@ -166,6 +189,7 @@ static void getSaveStatePath(char* savePath, size_t maxLen) {
         strncat(savePath, ".sav", maxLen - strlen(savePath) - 1);
     }
 }
+
 // ================ 初始化函数 ================
 void initializeSerial() {
 #if ENABLE_DEBUG_SERIAL
@@ -175,6 +199,7 @@ void initializeSerial() {
     (void)0;
 #endif
 }
+
 void initializeScreen() {
     tft.init();
     tft.setRotation(1);  // 横屏 160x128
@@ -199,6 +224,7 @@ void initializeScreen() {
         MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
     );
 }
+
 void drawBootLogo(int y, uint16_t color) {
     const int logoX = (TFT_WIDTH - DIJI_LOGO_W) / 2;
     tft.drawBitmap(logoX, y, DIJI_LOGO_BITS, DIJI_LOGO_W, DIJI_LOGO_H, color);
@@ -209,12 +235,14 @@ void drawBootLogo(int y, uint16_t color) {
     tft.setCursor((TFT_WIDTH - subW) / 2, y + DIJI_LOGO_H + 8);
     tft.print(subtitle);
 }
+
 static bool bootLogoPixelOn(int x, int y) {
     if (x < 0 || x >= DIJI_LOGO_W || y < 0 || y >= DIJI_LOGO_H) return false;
     int byteIndex = y * ((DIJI_LOGO_W + 7) / 8) + (x >> 3);
     uint8_t mask = 0x80 >> (x & 7);
     return (pgm_read_byte(DIJI_LOGO_BITS + byteIndex) & mask) != 0;
 }
+
 static bool bootLogoBlockOn(int x, int y, int blockSize) {
     for (int yy = 0; yy < blockSize; yy++) {
         for (int xx = 0; xx < blockSize; xx++) {
@@ -223,6 +251,7 @@ static bool bootLogoBlockOn(int x, int y, int blockSize) {
     }
     return false;
 }
+
 static uint32_t bootHash(uint32_t value) {
     value ^= value >> 16;
     value *= 0x7feb352d;
@@ -231,6 +260,7 @@ static uint32_t bootHash(uint32_t value) {
     value ^= value >> 16;
     return value;
 }
+
 void playBootAnimation() {
     tft.fillScreen(TFT_BLACK);
     const int logoY = 20;
@@ -277,6 +307,7 @@ void playBootAnimation() {
     drawBootLogo(logoY, TFT_WHITE);
     delay(2000);
 }
+
 static bool tryEnqueueFrame() {
     PPU& ppu = nes.getPPU();
     if (!ppu.frameReady) return false;
@@ -294,6 +325,7 @@ static bool tryEnqueueFrame() {
     }
     return false;
 }
+
 // ====================================================================
 //  display_task：256x240 帧缓冲 -> 2x 降采样到 128x120 -> DMA 推屏
 // ====================================================================
@@ -326,12 +358,14 @@ static void display_task(void* arg) {
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
+
 void runFrame() {
     const int SCANLINES_PER_FRAME = 262;
     for (int i = 0; i < SCANLINES_PER_FRAME; ++i) {
         nes.stepScanline();
     }
 }
+
 void initializeButtons() {
     pinMode(A_BUTTON, INPUT_PULLUP);
     pinMode(B_BUTTON, INPUT_PULLUP);
@@ -342,6 +376,7 @@ void initializeButtons() {
     pinMode(START_BUTTON, INPUT_PULLUP);
     pinMode(SELECT_BUTTON, INPUT_PULLUP);
 }
+
 void updateButtons() {
     buttons.A      = !digitalRead(A_BUTTON);
     buttons.B      = !digitalRead(B_BUTTON);
@@ -352,6 +387,7 @@ void updateButtons() {
     buttons.START  = !digitalRead(START_BUTTON);
     buttons.SELECT = !digitalRead(SELECT_BUTTON);
 }
+
 // ================ 清除屏幕，进入游戏前调用 ================
 void clearScreenForGame() {
     tft.waitDMA();
@@ -363,6 +399,7 @@ void clearScreenForGame() {
     uint8_t dummy;
     while (xQueueReceive(frame_queue, &dummy, 0) == pdTRUE) {}
 }
+
 bool tryInitSD() {
     sdSPI.begin(SD_SCLK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
     if (!SD.begin(SD_CS_PIN, sdSPI, SD_FREQ)) {
@@ -374,9 +411,11 @@ bool tryInitSD() {
     sdCardAvailable = true;
     return true;
 }
+
 void initializeSD() {
     tryInitSD();
 }
+
 // ================ ROM 文件扫描 ================
 void scanROMFiles() {
     romList.clear();
@@ -414,6 +453,7 @@ void scanROMFiles() {
     Serial.printf("Total ROMs found: %d\n", romList.size());
     std::sort(romList.begin(), romList.end());
 }
+
 static int nextUtf8CharIndex(const String& text, int index) {
     const int length = text.length();
     if (index >= length) return length;
@@ -432,6 +472,7 @@ static int nextUtf8CharIndex(const String& text, int index) {
     }
     return index + charBytes;
 }
+
 static String trimTextToPixelWidth(const String& text, int maxWidth, const lgfx::IFont* font) {
     if (tft.textWidth(text, font) <= maxWidth) return text;
     const String ellipsis = "...";
@@ -447,6 +488,7 @@ static String trimTextToPixelWidth(const String& text, int maxWidth, const lgfx:
     }
     return result + ellipsis;
 }
+
 static String getROMDisplayName(const String& romPath) {
     String displayName = romPath;
     int lastSlash = displayName.lastIndexOf('/');
@@ -459,11 +501,13 @@ static String getROMDisplayName(const String& romPath) {
     }
     return trimTextToPixelWidth(displayName, MENU_ROM_NAME_MAX_WIDTH, MENU_ROM_FONT);
 }
+
 static void drawROMDisplayName(const String& romPath, int x, int y, uint16_t color) {
     tft.setTextSize(1);
     tft.setTextColor(color);
     tft.drawString(getROMDisplayName(romPath), x, y, MENU_ROM_FONT);
 }
+
 // ================ 主菜单绘制 (160x128 横屏) ================
 void drawMainMenu() {
     tft.fillScreen(MENU_BG_COLOR);
@@ -544,6 +588,7 @@ void drawMainMenu() {
     tft.setCursor(6, hintY + 4);
     tft.print("UP/DOWN:Select  A/START:Play");
 }
+
 // ================ 暂停菜单绘制 (160x128) ================
 void drawPauseMenu() {
     // 在游戏画面（128x120, x=16~144, y=4~124）上绘制条纹遮罩
@@ -595,6 +640,7 @@ void drawPauseMenu() {
     tft.setCursor(8, menuY + menuHeight - 8);
     tft.print("UP/DOWN Select  L/R Vol");
 }
+
 void drawVolumeBlocks(int x, int y, uint8_t level, bool selected) {
     const int blockW = 7;
     const int blockH = 7;
@@ -612,6 +658,7 @@ void drawVolumeBlocks(int x, int y, uint8_t level, bool selected) {
         }
     }
 }
+
 // ================ 菜单输入处理 ================
 void handleMenuInput() {
     unsigned long now = millis();
@@ -656,6 +703,7 @@ void handleMenuInput() {
         drawMenuList();
     }
 }
+
 // ================ 绘制菜单列表区域（局部刷新） ================
 void drawMenuList() {
     const int listStartY  = 26;
@@ -693,6 +741,7 @@ void drawMenuList() {
     snprintf(pageInfo, sizeof(pageInfo), "%d/%d", currentPage, totalPages);
     tft.print(pageInfo);
 }
+
 // ================ 暂停输入处理 ================
 void handlePauseInput() {
     unsigned long now = millis();
@@ -809,6 +858,7 @@ void handlePauseInput() {
         if (currentState == STATE_PAUSED) drawPauseMenu();
     }
 }
+
 // ================ 加载选中的ROM ================
 bool loadSelectedROM() {
     if (selectedIndex < 0 || selectedIndex >= (int)romList.size()) return false;
@@ -855,6 +905,7 @@ bool loadSelectedROM() {
     gameJustEntered = true;
     return true;
 }
+
 // ================ 返回主菜单 ================
 void returnToMainMenu() {
     gameRunning = false;
@@ -866,9 +917,11 @@ void returnToMainMenu() {
     tft.fillScreen(MENU_BG_COLOR);
     drawMainMenu();
 }
+
 void loadROM() {
     if (sdCardAvailable) scanROMFiles();
 }
+
 // ---------------- Audio (I2S) ----------------
 static void initializeAudio() {
     i2s_config_t i2s_config = {
@@ -899,6 +952,7 @@ static void initializeAudio() {
     nes.apu.setSampleRate(AUDIO_SAMPLE_RATE);
     xTaskCreatePinnedToCore(apu_task, "APU", 2048, &nes.apu, 1, NULL, 0);
 }
+
 static void apu_task(void* arg) {
     APU* apu = (APU*)arg;
     while (1) {
@@ -909,11 +963,13 @@ static void apu_task(void* arg) {
         }
     }
 }
+
 static void muteAudio() {
     i2s_zero_dma_buffer((i2s_port_t)I2S_NUM);
     delay(50);
     i2s_zero_dma_buffer((i2s_port_t)I2S_NUM);
 }
+
 // ================ 主程序 ================
 void setup() {
     initializeSerial();
@@ -932,6 +988,7 @@ void setup() {
     playBootAnimation();
     drawMainMenu();
 }
+
 void loop() {
     switch (currentState) {
         case STATE_MENU:
